@@ -8,9 +8,9 @@ declare module 'knex/types/tables' {
       username: string
       email: string
       password: string
-      created_at: number
-      updated_at?: number
-      deleted_at?: number
+      created_at?: string
+      updated_at?: string
+      deleted_at?: string
     }
     meals: {
       owner: string
@@ -18,11 +18,11 @@ declare module 'knex/types/tables' {
       type: string
       title: string
       description?: string
-      datetime: number
+      datetime: string
       in_diet: boolean
-      created_at: number
-      updated_at?: number
-      deleted_at?: number
+      created_at: string
+      updated_at?: string
+      deleted_at?: string
     }
   }
 }
