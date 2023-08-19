@@ -4,7 +4,6 @@ declare module 'knex/types/tables' {
   export interface Tables {
     users: {
       id: string
-      session_id: string
       username: string
       email: string
       password: string
@@ -20,9 +19,16 @@ declare module 'knex/types/tables' {
       description?: string
       datetime: string
       in_diet: boolean
-      created_at: string
+      created_at?: string
       updated_at?: string
       deleted_at?: string
+    }
+    sessions: {
+      id: string
+      user_id_session: string
+      expires: string
+      created_at?: string
+      updated_at?: string
     }
   }
 }
