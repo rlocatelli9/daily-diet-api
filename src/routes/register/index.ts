@@ -95,45 +95,30 @@ export async function RegisterRoutes(app: FastifyInstance) {
     const date = new Date()
     const expires = new Date(date.setDate(date.getDate() + 7))
     if (!userSession) {
-      reply.cookie('sessionId', sessionId, {
-        path: '/',
-        maxAge: 1000 * 60 * 60 * 24 * 7, // 7days in miliseconds
-        expires,
-      } as SerializeOptions)
-
       await knex('sessions').insert({
-        id: crypto.randomUUID(),
+        id: sessionId,
         user_id_session: user.id,
         expires: expires.toISOString(),
       })
     } else {
-      const session = await knex('sessions')
-        .where({ id: userSession.id })
+      await knex('sessions')
         .update({
+          id: sessionId,
           expires: expires.toISOString(),
-          updated_at: new Date().toISOString(),
         })
-
-      if (session === 0) {
-        reply.status(400).send({
-          error: {
-            message: 'Session not found',
-          },
-        })
-      }
-
-      reply.cookie('sessionId', userSession.id, {
-        path: '/',
-        expires,
-        maxAge: expires.getTime(),
-      } as SerializeOptions)
-
-      reply.status(200).send({
-        sessionId: userSession.id,
-        username: user.username,
-        email: user.email,
-      })
+        .where({ user_id_session: user.id })
     }
+
+    reply.cookie('sessionId', sessionId, {
+      path: '/',
+      maxAge: 1000 * 60 * 60 * 24 * 7, // 7days in miliseconds
+      expires,
+    } as SerializeOptions)
+
+    reply.status(200).send({
+      username: user.username,
+      email: user.email,
+    })
   })
 
   app.patch(
