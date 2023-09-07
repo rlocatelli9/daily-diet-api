@@ -63,7 +63,7 @@ export async function RegisterRoutes(app: FastifyInstance) {
       })
 
       await knex('sessions').insert({
-        id: crypto.randomUUID(),
+        id: sessionId,
         user_id_session: userId,
         expires: expires.toISOString(),
       })
@@ -149,6 +149,47 @@ export async function RegisterRoutes(app: FastifyInstance) {
             message: 'Ocorreu um erro na sua requisição. Tente novamente!',
           },
         })
+      }
+    },
+  )
+
+  app.post(
+    '/meal',
+    {
+      preHandler: checkSessionIdExists,
+    },
+    async (request, reply) => {
+      const validateMealBodySchema = z.object({
+        title: z.string().nonempty(),
+        datetime: z.string().datetime().pipe(z.coerce.date()),
+        description: z.string().nonempty(),
+        inDiet: z.boolean(),
+      })
+
+      try {
+        const sessionId = request.cookies.sessionId
+        const owner = await knex('sessions')
+          .select('user_id_session as id')
+          .where({ id: sessionId })
+          .first()
+
+        const { description, inDiet, title, datetime } =
+          validateMealBodySchema.parse(request.body)
+
+        await knex('meals').insert({
+          id: crypto.randomUUID(),
+          owner: owner.id,
+          title,
+          description,
+          datetime: datetime.toISOString(),
+          in_diet: inDiet,
+        })
+
+        reply.status(201).send()
+      } catch (error) {
+        reply
+          .code(400)
+          .send({ error: 'Bad request on register meal. Try again please!' })
       }
     },
   )
