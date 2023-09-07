@@ -1,0 +1,189 @@
+import type { FastifyInstance } from 'fastify'
+
+import { z } from 'zod'
+
+import { knex } from 'database'
+import { checkSessionIdExists } from 'middlewares'
+
+export async function MealsRoutes(app: FastifyInstance) {
+  app.get(
+    '/',
+    {
+      preHandler: checkSessionIdExists,
+    },
+    async (req, reply) => {
+      const meals = await knex('meals').select('*').whereNull('deleted_at')
+
+      reply.status(201).send({ data: meals })
+    },
+  )
+
+  app.get(
+    '/list',
+    {
+      preHandler: checkSessionIdExists,
+    },
+    async (request, reply) => {
+      const sessionId = request.cookies.sessionId
+      const owner = await knex('sessions')
+        .select('user_id_session as id')
+        .where({ id: sessionId })
+        .first()
+
+      const meals = await knex('meals')
+        .select('*')
+        .where({ owner: owner.id })
+        .whereNull('deleted_at')
+        .orderBy('datetime')
+
+      reply.status(201).send({ data: meals })
+    },
+  )
+
+  app.get(
+    '/metrics',
+    {
+      preHandler: checkSessionIdExists,
+    },
+    async (request, reply) => {
+      const sessionId = request.cookies.sessionId
+      const owner = await knex('sessions')
+        .select('user_id_session as id')
+        .where({ id: sessionId })
+        .first()
+
+      const meals = await knex('meals')
+        .select('*')
+        .where({ owner: owner.id })
+        .whereNull('deleted_at')
+        .orderBy('datetime')
+
+      const sequence = {
+        total: 0,
+        better: 0,
+      }
+
+      meals.reduce((acc, item) => {
+        if (item.in_diet) {
+          acc.total += 1
+          if (acc.better < acc.total) {
+            acc.better = acc.total
+          }
+        } else {
+          acc.total = 0
+        }
+        console.log({ acc })
+        return acc
+      }, sequence)
+
+      const metrics = {
+        total: meals.length,
+        in: meals.filter((meal) => meal.in_diet).length,
+        out: meals.filter((meal) => !meal.in_diet).length,
+        sequence: sequence.better,
+      }
+
+      reply.status(201).send({ data: metrics })
+    },
+  )
+
+  app.get(
+    '/:id',
+    {
+      preHandler: checkSessionIdExists,
+    },
+    async (request, reply) => {
+      const deleteParamsSchema = z.object({
+        id: z.string(),
+      })
+
+      const { id } = deleteParamsSchema.parse(request.params)
+
+      const meal = await knex('meals').where({ id }).first()
+
+      if (!meal) {
+        reply.status(404).send({ message: 'not found' })
+      }
+
+      reply.status(201).send({ data: meal })
+    },
+  )
+
+  app.put(
+    '/:id',
+    {
+      preHandler: checkSessionIdExists,
+    },
+    async (request, reply) => {
+      const deleteParamsSchema = z.object({
+        id: z.string(),
+      })
+
+      const { id } = deleteParamsSchema.parse(request.params)
+
+      const oldMeal = await knex('meals')
+        .select('title', 'description', 'datetime', 'in_diet as inDiet')
+        .where({ id })
+        .first()
+
+      if (!oldMeal) {
+        reply.status(401).send({ erro: 'Meal is not exists' })
+      }
+
+      const validateMealBodySchema = z
+        .object({
+          title: z.string(),
+          datetime: z.string().datetime().pipe(z.coerce.date()),
+          description: z.string(),
+          inDiet: z.boolean(),
+        })
+        .partial()
+
+      const { datetime, description, inDiet, title } =
+        validateMealBodySchema.parse(request.body)
+
+      const updatedMeal = await knex('meals')
+        .update(
+          {
+            title,
+            description,
+            datetime: datetime?.toISOString(),
+            in_diet: inDiet || oldMeal.inDiet,
+            updated_at: new Date().toISOString(),
+          },
+          ['title', 'description', 'datetime', 'in_diet', 'updated_at'],
+        )
+        .where({ id })
+        .then()
+        .catch((err) => console.log(err))
+
+      reply.status(200).send({ data: updatedMeal })
+    },
+  )
+
+  app.delete(
+    '/delete/:id',
+    {
+      preHandler: checkSessionIdExists,
+    },
+    async (request, reply) => {
+      const deleteParamsSchema = z.object({
+        id: z.string(),
+      })
+
+      const { id } = deleteParamsSchema.parse(request.params)
+
+      const meal = await knex('meals').where({ id }).first()
+
+      if (!meal) {
+        reply.status(401).send({ error: 'Meal not found' })
+      }
+
+      await knex('meals')
+        .update({ deleted_at: new Date().toISOString() })
+        .where({ id })
+
+      reply.status(201).send()
+    },
+  )
+}
