@@ -7,12 +7,12 @@ import { checkSessionIdExists } from 'middlewares'
 
 export async function UsersRoutes(app: FastifyInstance) {
   app.get(
-    '/',
+    '/list',
     {
       preHandler: checkSessionIdExists,
     },
     async (req, reply) => {
-      const users = await knex('users').select('*')
+      const users = await knex('users').select('*').whereNull('deleted_at')
 
       reply.status(201).send({ data: users })
     },
@@ -30,10 +30,7 @@ export async function UsersRoutes(app: FastifyInstance) {
 
       const { id } = deleteParamsSchema.parse(request.params)
 
-      const user = await knex('users')
-        .where({ id })
-        .havingNull('deleted_at')
-        .first()
+      const user = await knex('users').where({ id }).first()
 
       if (!user) {
         reply.status(401).send({ error: 'User not found' })
