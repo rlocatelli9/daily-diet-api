@@ -6,7 +6,9 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 
 import { knex } from 'database'
-import { checkSessionIdExists } from 'middlewares'
+import { checkSessionIdExists, checkUserIdExists } from 'middlewares'
+import { decrypt, getErrorMessage } from 'utils'
+import { parsedEnv } from '@environment/index'
 
 export async function RegisterRoutes(app: FastifyInstance) {
   app.get(
@@ -26,7 +28,7 @@ export async function RegisterRoutes(app: FastifyInstance) {
         )
         .innerJoin('users', 'sessions.user_id_session', 'users.id')
 
-      reply.status(200).send({ sessions })
+      reply.status(200).send({ data: sessions })
     },
   )
 
@@ -70,7 +72,7 @@ export async function RegisterRoutes(app: FastifyInstance) {
 
       reply.status(201).send()
     } catch (error) {
-      reply.code(400).send({ error: 'Bad request' })
+      reply.status(400).send({ error: getErrorMessage(error) })
     }
   })
 
@@ -85,29 +87,19 @@ export async function RegisterRoutes(app: FastifyInstance) {
       return reply.code(401).send({ error: 'User not found' })
     }
     if (user.password !== password) {
-      return reply.code(401).send({ error: 'The password is incorrect' })
+      return reply.code(401).send({ error: 'The data is incorrect' })
     }
 
-    const userSession = await knex('sessions')
-      .where({ user_id_session: user.id })
-      .first()
     const sessionId = crypto.randomUUID()
     const date = new Date()
     const expires = new Date(date.setDate(date.getDate() + 7))
-    if (!userSession) {
-      await knex('sessions').insert({
+
+    await knex('sessions')
+      .update({
         id: sessionId,
-        user_id_session: user.id,
         expires: expires.toISOString(),
       })
-    } else {
-      await knex('sessions')
-        .update({
-          id: sessionId,
-          expires: expires.toISOString(),
-        })
-        .where({ user_id_session: user.id })
-    }
+      .where({ user_id_session: user.id })
 
     reply.cookie('sessionId', sessionId, {
       path: '/',
@@ -116,8 +108,10 @@ export async function RegisterRoutes(app: FastifyInstance) {
     } as SerializeOptions)
 
     reply.status(200).send({
-      username: user.username,
-      email: user.email,
+      data: {
+        username: user.username,
+        email: user.email,
+      },
     })
   })
 
@@ -142,7 +136,7 @@ export async function RegisterRoutes(app: FastifyInstance) {
           domain: 'localhost',
         })
 
-        reply.status(201).send()
+        reply.status(204).send()
       } else {
         reply.status(400).send({
           error: {
@@ -156,9 +150,18 @@ export async function RegisterRoutes(app: FastifyInstance) {
   app.post(
     '/meal',
     {
-      preHandler: checkSessionIdExists,
+      preHandler: [checkSessionIdExists, checkUserIdExists],
     },
     async (request, reply) => {
+      const userId: string = request.headers.user as string
+
+      const decrypted = decrypt(userId, parsedEnv.SECRET_KEY)
+      if (!decrypted || decrypted === '') {
+        reply.status(400).send({
+          error: 'User not found. Please try again after the login.',
+        })
+      }
+
       const validateMealBodySchema = z.object({
         title: z.string().nonempty(),
         datetime: z.string().datetime().pipe(z.coerce.date()),
@@ -167,18 +170,12 @@ export async function RegisterRoutes(app: FastifyInstance) {
       })
 
       try {
-        const sessionId = request.cookies.sessionId
-        const owner = await knex('sessions')
-          .select('user_id_session as id')
-          .where({ id: sessionId })
-          .first()
-
         const { description, inDiet, title, datetime } =
           validateMealBodySchema.parse(request.body)
 
         await knex('meals').insert({
           id: crypto.randomUUID(),
-          owner: owner.id,
+          owner: decrypted,
           title,
           description,
           datetime: datetime.toISOString(),
@@ -187,9 +184,7 @@ export async function RegisterRoutes(app: FastifyInstance) {
 
         reply.status(201).send()
       } catch (error) {
-        reply
-          .code(400)
-          .send({ error: 'Bad request on register meal. Try again please!' })
+        reply.status(400).send({ error: getErrorMessage(error) })
       }
     },
   )
