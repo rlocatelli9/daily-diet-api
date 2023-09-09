@@ -1,3 +1,4 @@
+import { knex } from '@database/index'
 import { FastifyReply, FastifyRequest } from 'fastify'
 
 export async function checkSessionIdExists(
@@ -8,7 +9,24 @@ export async function checkSessionIdExists(
 
   if (!sessionId) {
     return reply.status(401).send({
-      error: 'Session not found',
+      error: 'Not found session',
+    })
+  }
+
+  const session = await knex('sessions')
+    .select('expires')
+    .where({ id: sessionId })
+    .first()
+
+  if (!session) {
+    return reply.status(401).send({
+      error: 'Not found session',
+    })
+  }
+
+  if (session.expires < new Date().toISOString()) {
+    return reply.status(401).send({
+      error: 'Expired session',
     })
   }
 }
