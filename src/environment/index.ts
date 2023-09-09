@@ -14,6 +14,7 @@ const envSchema = zod.object({
   DATABASE_CLIENT: zod.enum(['sqlite', 'pg']),
   DATABASE_URL: zod.string(),
   PORT: zod.coerce.number().default(3333),
+  SECRET_KEY: zod.string(),
 })
 
 export const _env = envSchema.safeParse(process.env)
