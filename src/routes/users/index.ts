@@ -14,7 +14,7 @@ export async function UsersRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const users = await knex('users').select('*').whereNull('deleted_at')
 
-      reply.status(201).send({ data: users })
+      reply.status(200).send({ data: users })
     },
   )
 
@@ -40,7 +40,7 @@ export async function UsersRoutes(app: FastifyInstance) {
         .update({ deleted_at: new Date().toISOString() })
         .where({ id })
 
-      reply.status(201).send()
+      reply.status(204).send()
     },
   )
 }
