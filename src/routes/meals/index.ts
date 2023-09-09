@@ -3,7 +3,9 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 
 import { knex } from 'database'
-import { checkSessionIdExists } from 'middlewares'
+import { checkSessionIdExists, checkUserIdExists } from 'middlewares'
+import { parsedEnv } from 'environment'
+import { decrypt, getErrorMessage } from 'utils'
 
 export async function MealsRoutes(app: FastifyInstance) {
   app.get(
@@ -14,47 +16,52 @@ export async function MealsRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const meals = await knex('meals').select('*').whereNull('deleted_at')
 
-      reply.status(201).send({ data: meals })
+      reply.status(200).send({ data: meals })
     },
   )
 
   app.get(
     '/list',
     {
-      preHandler: checkSessionIdExists,
+      preHandler: [checkSessionIdExists, checkUserIdExists],
     },
     async (request, reply) => {
-      const sessionId = request.cookies.sessionId
-      const owner = await knex('sessions')
-        .select('user_id_session as id')
-        .where({ id: sessionId })
-        .first()
+      const id: string = request.headers.user as string
+
+      const decrypted = decrypt(id, parsedEnv.SECRET_KEY)
+      if (!decrypted || decrypted === '') {
+        reply.status(400).send({
+          error: 'User not found. Please try again after the login.',
+        })
+      }
 
       const meals = await knex('meals')
         .select('*')
-        .where({ owner: owner.id })
+        .where({ owner: decrypted })
         .whereNull('deleted_at')
         .orderBy('datetime')
-
-      reply.status(201).send({ data: meals })
+      reply.status(200).send({ data: meals })
     },
   )
 
   app.get(
     '/metrics',
     {
-      preHandler: checkSessionIdExists,
+      preHandler: [checkSessionIdExists, checkUserIdExists],
     },
     async (request, reply) => {
-      const sessionId = request.cookies.sessionId
-      const owner = await knex('sessions')
-        .select('user_id_session as id')
-        .where({ id: sessionId })
-        .first()
+      const id: string = request.headers.user as string
+
+      const decrypted = decrypt(id, parsedEnv.SECRET_KEY)
+      if (!decrypted || decrypted === '') {
+        reply.status(400).send({
+          error: 'User not found. Please try again after the login.',
+        })
+      }
 
       const meals = await knex('meals')
         .select('*')
-        .where({ owner: owner.id })
+        .where({ owner: decrypted })
         .whereNull('deleted_at')
         .orderBy('datetime')
 
@@ -83,38 +90,59 @@ export async function MealsRoutes(app: FastifyInstance) {
         sequence: sequence.better,
       }
 
-      reply.status(201).send({ data: metrics })
+      reply.status(200).send({ data: metrics })
     },
   )
 
   app.get(
     '/:id',
     {
-      preHandler: checkSessionIdExists,
+      preHandler: [checkSessionIdExists, checkUserIdExists],
     },
     async (request, reply) => {
-      const deleteParamsSchema = z.object({
+      const userId: string = request.headers.user as string
+
+      const decrypted = decrypt(userId, parsedEnv.SECRET_KEY)
+      if (!decrypted || decrypted === '') {
+        reply.status(400).send({
+          error: 'User not found. Please try again after the login.',
+        })
+      }
+
+      const getParamsSchema = z.object({
         id: z.string(),
       })
 
-      const { id } = deleteParamsSchema.parse(request.params)
+      const { id } = getParamsSchema.parse(request.params)
 
-      const meal = await knex('meals').where({ id }).first()
+      const meal = await knex('meals')
+        .where({ id })
+        .where({ owner: decrypted })
+        .first()
 
       if (!meal) {
-        reply.status(404).send({ message: 'not found' })
+        reply.status(404).send({ message: 'Meal not found' })
       }
 
-      reply.status(201).send({ data: meal })
+      reply.status(200).send({ data: meal })
     },
   )
 
   app.put(
     '/:id',
     {
-      preHandler: checkSessionIdExists,
+      preHandler: [checkSessionIdExists, checkUserIdExists],
     },
     async (request, reply) => {
+      const userId: string = request.headers.user as string
+
+      const decrypted = decrypt(userId, parsedEnv.SECRET_KEY)
+      if (!decrypted || decrypted === '') {
+        reply.status(400).send({
+          error: 'User not found. Please try again after the login.',
+        })
+      }
+
       const deleteParamsSchema = z.object({
         id: z.string(),
       })
@@ -124,6 +152,7 @@ export async function MealsRoutes(app: FastifyInstance) {
       const oldMeal = await knex('meals')
         .select('title', 'description', 'datetime', 'in_diet as inDiet')
         .where({ id })
+        .where({ owner: decrypted })
         .first()
 
       if (!oldMeal) {
@@ -142,48 +171,70 @@ export async function MealsRoutes(app: FastifyInstance) {
       const { datetime, description, inDiet, title } =
         validateMealBodySchema.parse(request.body)
 
-      const updatedMeal = await knex('meals')
-        .update(
-          {
-            title,
-            description,
-            datetime: datetime?.toISOString(),
-            in_diet: inDiet || oldMeal.inDiet,
-            updated_at: new Date().toISOString(),
-          },
-          ['title', 'description', 'datetime', 'in_diet', 'updated_at'],
-        )
-        .where({ id })
-        .then()
-        .catch((err) => console.log(err))
+      try {
+        const updatedMeal = await knex('meals')
+          .update(
+            {
+              title,
+              description,
+              datetime: datetime?.toISOString(),
+              in_diet: inDiet || oldMeal.inDiet,
+              updated_at: new Date().toISOString(),
+            },
+            ['title', 'description', 'datetime', 'in_diet', 'updated_at'],
+          )
+          .where({ id })
+          .where({ owner: decrypted })
+          .then()
+          .catch((err) => console.log(err))
 
-      reply.status(200).send({ data: updatedMeal })
+        reply.status(200).send({ data: updatedMeal })
+      } catch (error) {
+        reply.status(400).send({ error: getErrorMessage(error) })
+      }
     },
   )
 
   app.delete(
     '/delete/:id',
     {
-      preHandler: checkSessionIdExists,
+      preHandler: [checkSessionIdExists, checkUserIdExists],
     },
     async (request, reply) => {
+      const userId: string = request.headers.user as string
+
+      const decrypted = decrypt(userId, parsedEnv.SECRET_KEY)
+      if (!decrypted || decrypted === '') {
+        reply.status(400).send({
+          error: 'User not found. Please try again after the login.',
+        })
+      }
+
       const deleteParamsSchema = z.object({
         id: z.string(),
       })
 
       const { id } = deleteParamsSchema.parse(request.params)
 
-      const meal = await knex('meals').where({ id }).first()
+      const meal = await knex('meals')
+        .where({ id })
+        .where({ owner: decrypted })
+        .first()
 
       if (!meal) {
         reply.status(401).send({ error: 'Meal not found' })
       }
 
-      await knex('meals')
-        .update({ deleted_at: new Date().toISOString() })
-        .where({ id })
+      try {
+        await knex('meals')
+          .update({ deleted_at: new Date().toISOString() })
+          .where({ id })
+          .where({ owner: decrypted })
 
-      reply.status(201).send()
+        reply.status(204).send()
+      } catch (error) {
+        reply.status(400).send({ error: getErrorMessage(error) })
+      }
     },
   )
 }
